@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/wsehl/portls/compare/v0.3.0...v0.3.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* rename repository to portls ([5656b9d](https://github.com/wsehl/portls/commit/5656b9d5344abcbfddacd144ad980bda4bf853f4))
+
 ## [0.3.0](https://github.com/wsehl/pls/compare/v0.2.0...v0.3.0) (2026-10-17)
 
 
