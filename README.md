@@ -1,4 +1,4 @@
-# pls
+# portls
 
 See what's listening on your ports, where it runs, and **which agent started it**.
 
