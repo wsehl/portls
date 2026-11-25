@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/wsehl/portls/compare/v0.4.0...v0.4.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* bundle effect dependencies into the CLI ([5775bad](https://github.com/wsehl/portls/commit/5775bad93463e26dfc75ce035b21ac0474d54266))
+
 ## [0.4.0](https://github.com/wsehl/portls/compare/v0.3.1...v0.4.0) (2026-11-25)
 
 
