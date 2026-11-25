@@ -37,7 +37,9 @@ pnpm install -g @wsehl/pls
 | `pls --all`               | Everything                                                                   |
 | `pls <port...>`           | Full details for specific ports                                              |
 | `pls --json`              | Machine-readable output                                                      |
+| `pls --dir <path>`        | Only listeners whose directory contains that path, e.g. `circles`            |
 | `pls kill [-f] <port...>` | Stop whatever listens on those ports                                         |
+| `pls kill [-f] <dir...>`  | Stop everything `pls <dir...>` lists; ports and dirs can be mixed            |
 | `pls --completions zsh`   | Shell completions                                                            |
 
 ## How it works

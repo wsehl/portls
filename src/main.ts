@@ -12,9 +12,14 @@ import {
 import { Argument, CliError, Command, Flag } from "effect/cli";
 
 import packageJson from "../package.json" with { type: "json" };
-import { type Listener, Port } from "./Listener.ts";
 import { PortScanner, type ScanError } from "./PortScanner.ts";
 import { type RenderOptions, renderDetail, renderTable } from "./render.ts";
+import {
+  type Target,
+  describeTargets,
+  parseTarget,
+  selectListeners,
+} from "./select.ts";
 
 const toUserError = (error: ScanError) =>
   new CliError.UserError({ cause: error, userMessage: error.message });
@@ -23,10 +28,10 @@ const scanListeners = PortScanner.use((scanner) => scanner.listeners).pipe(
   Effect.mapError(toUserError),
 );
 
-const nothingListening = (ports: ReadonlyArray<Port>) =>
+const nothingListening = (targets: ReadonlyArray<Target>) =>
   new CliError.UserError({
     cause: null,
-    userMessage: `Nothing is listening on ${ports.map((port) => `:${port}`).join(", ")}`,
+    userMessage: `Nothing is listening ${describeTargets(targets)}`,
   });
 
 /** Colour and truncation only make sense on an interactive terminal. Honours https://no-color.org. */
@@ -45,43 +50,21 @@ const renderOptions = Effect.gen(function* () {
   } satisfies RenderOptions;
 });
 
-/**
- * GUI apps and system daemons are started by launchd/init with `/` as their
- * working directory, whereas dev servers run inside a project.
- */
-const isSystemListener = (listener: Listener) => listener.cwd === "/";
-
-const selectListeners = (
-  listeners: ReadonlyArray<Listener>,
-  {
-    ports,
-    includeSystem,
-  }: { readonly ports: ReadonlyArray<Port>; readonly includeSystem: boolean },
-): ReadonlyArray<Listener> => {
-  // Explicitly requested ports are never hidden.
-  if (ports.length > 0) {
-    return listeners.filter((listener) => ports.includes(listener.port));
-  }
-
-  if (includeSystem) {
-    return listeners;
-  }
-
-  return listeners.filter((listener) => !isSystemListener(listener));
-};
-
-const portsArgument = (description: string) =>
-  Argument.Int("port").pipe(
-    Argument.withSchema(Port),
+const targetsArgument = (description: string) =>
+  Argument.String("port|dir").pipe(
+    Argument.mapTryCatch(
+      parseTarget,
+      () => "Ports must be between 1 and 65535",
+    ),
     Argument.withDescription(description),
   );
 
 const pls = Command.make(
   "pls",
   {
-    ports: portsArgument("Only show these ports, with full details").pipe(
-      Argument.variadic(),
-    ),
+    targets: targetsArgument(
+      "Ports (shown in full detail) or directories, e.g. `3000` or `circles`",
+    ).pipe(Argument.variadic()),
     all: Flag.Boolean("all").pipe(
       Flag.withAlias("a"),
       Flag.withDescription(
@@ -94,21 +77,25 @@ const pls = Command.make(
       Flag.withDefault(false),
     ),
   },
-  Effect.fn(function* ({ all, json, ports }) {
+  Effect.fn(function* ({ all, json, targets }) {
     const listeners = yield* scanListeners;
-    const selected = selectListeners(listeners, { ports, includeSystem: all });
+    const selected = selectListeners(listeners, {
+      targets,
+      includeSystem: all,
+    });
 
     if (json) {
       return yield* Console.log(JSON.stringify(selected, null, 2));
     }
 
-    if (ports.length > 0 && selected.length === 0) {
-      return yield* nothingListening(ports);
+    if (targets.length > 0 && selected.length === 0) {
+      return yield* nothingListening(targets);
     }
 
     const options = yield* renderOptions;
 
-    if (ports.length > 0) {
+    // Asking for specific ports means wanting to inspect them; a directory can hold many servers.
+    if (targets.length > 0 && targets.every(({ _tag }) => _tag === "Port")) {
       return yield* Console.log(
         selected
           .map((listener) => renderDetail(listener, options))
@@ -116,7 +103,9 @@ const pls = Command.make(
       );
     }
 
-    const hiddenCount = listeners.length - selected.length;
+    // Only the default view hides anything; targets select explicitly.
+    const hiddenCount =
+      targets.length === 0 ? listeners.length - selected.length : 0;
 
     yield* Console.log(
       renderTable({ listeners: selected, hiddenCount }, options),
@@ -136,6 +125,10 @@ const pls = Command.make(
       command: "pls 3000 5173",
       description: "Show details for specific ports",
     },
+    {
+      command: "pls circles",
+      description: "List servers running anywhere under a `circles` directory",
+    },
     { command: "pls --json", description: "Print listeners as JSON" },
   ]),
 );
@@ -143,8 +136,8 @@ const pls = Command.make(
 const kill = Command.make(
   "kill",
   {
-    ports: portsArgument(
-      "Port(s) whose listening processes should be stopped",
+    targets: targetsArgument(
+      "Ports, or directories whose servers should all be stopped, e.g. `3000` or `circles`",
     ).pipe(Argument.variadic({ min: 1 })),
     force: Flag.Boolean("force").pipe(
       Flag.withAlias("f"),
@@ -152,37 +145,41 @@ const kill = Command.make(
       Flag.withDefault(false),
     ),
   },
-  Effect.fn(function* ({ force, ports }) {
+  Effect.fn(function* ({ force, targets }) {
     const scanner = yield* PortScanner;
     const listeners = yield* scanListeners;
-    const requested = listeners.filter((listener) =>
-      ports.includes(listener.port),
-    );
+    // Same selection as `pls`, so `pls circles` previews exactly what `pls kill circles` stops.
+    const requested = selectListeners(listeners, {
+      targets,
+      includeSystem: false,
+    });
 
     // One process can listen on several of the requested ports; signal it only once.
-    const targets = new Map(
+    const processes = new Map(
       requested.map((listener) => [listener.pid, listener]),
     )
       .values()
       .toArray();
 
-    if (targets.length === 0) {
-      return yield* nothingListening(ports);
+    if (processes.length === 0) {
+      return yield* nothingListening(targets);
     }
 
     const signal = force ? "KILL" : "TERM";
 
-    for (const target of targets) {
+    for (const process of processes) {
       yield* scanner
-        .kill(target.pid, signal)
+        .kill(process.pid, signal)
         .pipe(Effect.mapError(toUserError));
       yield* Console.log(
-        `Sent SIG${signal} to ${target.label} (pid ${target.pid}) on :${target.port}`,
+        `Sent SIG${signal} to ${process.label} (pid ${process.pid}) on :${process.port}`,
       );
     }
   }),
 ).pipe(
-  Command.withDescription("Stop whatever is listening on the given port(s)"),
+  Command.withDescription(
+    "Stop whatever is listening on the given port(s) or under a directory",
+  ),
   Command.withExamples([
     {
       command: "pls kill 3000",
@@ -191,6 +188,10 @@ const kill = Command.make(
     {
       command: "pls kill -f 3000 3001",
       description: "Force-kill servers on :3000 and :3001",
+    },
+    {
+      command: "pls kill circles",
+      description: "Stop every server running under a `circles` directory",
     },
   ]),
 );
