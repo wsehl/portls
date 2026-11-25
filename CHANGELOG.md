@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/wsehl/portls/compare/v0.3.1...v0.4.0) (2026-11-25)
+
+
+### Features
+
+* select ports or directories as positional arguments ([f9aa38d](https://github.com/wsehl/portls/commit/f9aa38d7fd5bd496b0dc424bdf8401b3d2da945d))
+
 ## [0.3.1](https://github.com/wsehl/portls/compare/v0.3.0...v0.3.1) (2026-11-16)
 
 
